@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#FCF9F7">
 <meta name="color-scheme" content="light">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-qVRPRTbdUrVxm2Ua9bBc2X2Op1uRawcApFpG/4pylpI='; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-M98Xvk8Lw90qXNdXfIHYSnNko7QZ8ntteYYdE4vOI8c='; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Abschlussberatung Sek I</title>
 <meta name="description" content="Beratung zu Schulabschlüssen in Brandenburg: BBR, EBR, MSA (FOR) und FOR-Q – mit geführter Beratung, Rechner, Glossar und Gesetzestexten.">
@@ -766,6 +766,18 @@ details.eintrag > summary { min-height: 52px; padding-block: 13px; }
 .loop-pause .i-play, .loop-pause[aria-pressed="true"] .i-pause { display: none; }
 .loop-pause[aria-pressed="true"] .i-play { display: inline; }
 .loop-fenster.angehalten svg * { animation-play-state: paused !important; }
+/* Flüssiges Scrollen (v0.9.6): beim Scrollen und außerhalb des Bildes ruhen Hintergrund und Loop (AB.initScrollRuhe) */
+html.scrollt .held::before, .held.ruht::before,
+html.scrollt .held .loop-fenster svg *, .held.ruht .loop-fenster svg * { animation-play-state: paused !important; }
+/* Handy: kein zweites Milchglas über dem ohnehin weichgezeichneten Hintergrund – spart pro Bild eine Unschärfe-Berechnung */
+@media (max-width: 900px) {
+    .held .fenster { background: rgba(255,255,255,.55); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .abc-index { background: rgba(255,255,255,.96); backdrop-filter: none; -webkit-backdrop-filter: none; }   /* erscheint gerade beim schnellen Scrollen */
+}
+/* Handy/Tablet: Glasleiste ohne Unschärfe (wird sonst bei jedem Scroll-Bild neu berechnet), dafür fast deckend */
+@media (max-width: 1100px) {
+    .leiste-innen, .leiste-innen.mega-offen { background: rgba(255,255,255,.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 @media (max-width: 600px) { .loop-pause { top: 4%; right: 5%; width: 44px; height: 44px; background: #fff; box-shadow: var(--schatten-s); } }
 @media (prefers-reduced-motion: reduce) { .loop-pause { display: none; } }
 .fenster .leiter a { padding: 16px; border: 3px solid var(--ton); border-radius: 12px; background: #fff; box-shadow: none; }
@@ -1261,7 +1273,7 @@ details.abschluss-karte[class*="karte-"] .pille { background: rgba(255,255,255,.
     <div class="innen">
         <p class="fuss-satz">Orientierungshilfe, keine Rechtsberatung.</p>
         <p>Verbindlich entscheidet die Klassenkonferenz. Maßgeblich ist der amtliche Text der Verordnung.</p>
-        <p>Es werden keine Daten gespeichert oder übertragen. Stand der Rechtsquellen: Wortlaut aus BRAVORS, abgerufen am 09.11.2026 · Version 0.9.5</p>
+        <p>Es werden keine Daten gespeichert oder übertragen. Stand der Rechtsquellen: Wortlaut aus BRAVORS, abgerufen am 09.11.2026 · Version 0.9.6</p>
     </div>
 </footer>
 
@@ -11292,18 +11304,31 @@ AB.QUELLEN = {
     }
 };
 
-// Referenz 'sek26:37:3' -> { quelle, para, abs, label }
+// Referenz 'sek26:37:3' -> { quelle, para, abs, label } (mit Zwischenspeicher + O(1)-Paragrafenindex)
+const refCache = Object.create(null);
 AB.parseRef = function (ref) {
-    const [q, p, a] = String(ref).split(':');
+    const key = String(ref);
+    if (key in refCache) return refCache[key];
+    const [q, p, a] = key.split(':');
     const quelle = AB.QUELLEN[q];
-    if (!quelle) return null;
-    const para = p ? (quelle.paragraphen || []).find(x => x.nr === p) || null : null;
-    const abs = para && a ? para.absaetze.find(x => String(x.nr) === a) || null : null;
+    if (!quelle) return (refCache[key] = null);
+    if (!quelle._pMap) {
+        quelle._pMap = Object.create(null);
+        for (const x of (quelle.paragraphen || [])) {
+            quelle._pMap[x.nr] = x;
+            if (!x._aMap && x.absaetze) {
+                x._aMap = Object.create(null);
+                for (const ab of x.absaetze) x._aMap[String(ab.nr)] = ab;
+            }
+        }
+    }
+    const para = p ? quelle._pMap[p] || null : null;
+    const abs = para && a ? (para._aMap ? para._aMap[a] : para.absaetze.find(x => String(x.nr) === a)) || null : null;
     let label = '';
     if (p && p !== '–') label += (p.includes('/') ? '§§ ' : '§ ') + p;
     if (a && a !== '0') label += ' Abs. ' + a;
     label = (label ? label + ' ' : '') + quelle.kurz;
-    return { id: q, quelle, p: p || null, a: a || null, para, abs, label };
+    return (refCache[key] = { id: q, quelle, p: p || null, a: a || null, para, abs, label });
 };
 
 // Anker für eine Paragrafenstelle auf der Quellenseite
@@ -12720,30 +12745,48 @@ AB.normalisiere = (s) => String(s || '')
     .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
     .replace(/[^a-z0-9§\- ]+/g, ' ');
 
-// Alle durchsuchbaren Einträge der aktuellen Auswahl
+const BONUS = { Abschluss: 4, 'Nach Klasse 10': 3, Glossar: 3, FAQ: 2, Weg: 2, Gesetzestext: 0 };
+const bereiteVor = (e) => {
+    const roh = String(e.text).replace(/<[^>]+>/g, '');
+    e._roh = roh;
+    e._t = AB.normalisiere(e.titel + ' ' + (e.schlagworte || ''));
+    e._x = AB.normalisiere(roh);
+    e._bonus = BONUS[e.typ] || 0;
+    return e;
+};
+
+let statischIndex = null;
+const suchCache = Object.create(null);
+
+// Alle durchsuchbaren Einträge der aktuellen Auswahl (gecacht je Land + Schulform, Texte vorab normalisiert)
 AB.suchIndex = function () {
+    const key = (AB.auswahl ? AB.auswahl.land + ':' + AB.auswahl.schulform : 'BB:GES');
+    if (suchCache[key]) return suchCache[key];
+    if (!statischIndex) {
+        statischIndex = [];
+        const absatzText = (a) => [a.text, ...(a.liste || []), a.nach || ''].join(' ');
+        (AB.ANSCHLUESSE || []).forEach(w => statischIndex.push(bereiteVor({
+            typ: 'Nach Klasse 10', titel: w.name, text: [w.ort, w.voraussetzung, w.dauer, ...w.ziel, w.hinweis || ''].join(' '),
+            route: `#/anschluss#w-${w.id}`
+        })));
+        Object.entries(AB.QUELLEN).forEach(([qid, q]) => (q.paragraphen || []).forEach(p => p.absaetze.forEach(a => statischIndex.push(bereiteVor({
+            typ: 'Gesetzestext',
+            titel: `${p.nr === '–' ? '' : '§ ' + p.nr + (a.nr ? ' Abs. ' + a.nr : '') + ' '}${q.kurz} – ${p.titel}`,
+            text: absatzText(a),
+            route: '#/quellen#' + AB.refAnker(qid, p.nr, a.nr)
+        })))));
+    }
     const idx = [];
-    const absatzText = (a) => [a.text, ...(a.liste || []), a.nach || ''].join(' ');
-    AB.ABSCHLUESSE.filter(AB.passt).forEach(x => idx.push({
+    AB.ABSCHLUESSE.filter(AB.passt).forEach(x => idx.push(bereiteVor({
         typ: 'Abschluss', titel: `${x.kurz} – ${x.name}`, schlagworte: x.alias, text: [x.alias, x.kern, ...x.neu, ...x.alt].join(' '),
         route: '#/abschluesse/' + x.id
-    }));
-    AB.WEGE.filter(AB.passt).forEach(w => idx.push({
+    })));
+    AB.WEGE.filter(AB.passt).forEach(w => idx.push(bereiteVor({
         typ: 'Weg', titel: w.titel, text: w.schritte.map(s => s.wann + ' ' + s.text).join(' '), route: '#/wege#' + w.id
-    }));
-    (AB.ANSCHLUESSE || []).forEach(w => idx.push({
-        typ: 'Nach Klasse 10', titel: w.name, text: [w.ort, w.voraussetzung, w.dauer, ...w.ziel, w.hinweis || ''].join(' '),
-        route: `#/anschluss#w-${w.id}`
-    }));
-    AB.GLOSSAR.filter(AB.passt).forEach(g => idx.push({ typ: 'Glossar', titel: g.begriff, text: g.text, route: '#/wissen#g-' + g.id }));
-    AB.FAQ.filter(AB.passt).forEach(f => idx.push({ typ: 'FAQ', titel: f.frage, text: f.antwort, route: '#/faq#f-' + f.id }));
-    Object.entries(AB.QUELLEN).forEach(([qid, q]) => (q.paragraphen || []).forEach(p => p.absaetze.forEach(a => idx.push({
-        typ: 'Gesetzestext',
-        titel: `${p.nr === '–' ? '' : '§ ' + p.nr + (a.nr ? ' Abs. ' + a.nr : '') + ' '}${q.kurz} – ${p.titel}`,
-        text: absatzText(a),
-        route: '#/quellen#' + AB.refAnker(qid, p.nr, a.nr)
-    }))));
-    return idx;
+    })));
+    AB.GLOSSAR.filter(AB.passt).forEach(g => idx.push(bereiteVor({ typ: 'Glossar', titel: g.begriff, text: g.text, route: '#/wissen#g-' + g.id })));
+    AB.FAQ.filter(AB.passt).forEach(f => idx.push(bereiteVor({ typ: 'FAQ', titel: f.frage, text: f.antwort, route: '#/faq#f-' + f.id })));
+    return (suchCache[key] = idx.concat(statischIndex));
 };
 
 // Liefert Treffer sortiert nach Relevanz. Alle Suchwörter müssen vorkommen.
@@ -12751,27 +12794,29 @@ AB.suche = function (anfrage, max) {
     const woerter = AB.normalisiere(anfrage).split(/\s+/).filter(w => w.length >= 2);
     if (!woerter.length) return [];
     const treffer = [];
-    for (const e of AB.suchIndex()) {
-        const t = AB.normalisiere(e.titel + ' ' + (e.schlagworte || '')), x = AB.normalisiere(e.text);
+    const index = AB.suchIndex();
+    for (let i = 0; i < index.length; i++) {
+        const e = index[i], t = e._t, x = e._x;
         let score = 0, alle = true;
-        for (const w of woerter) {
+        for (let j = 0; j < woerter.length; j++) {
+            const w = woerter[j];
             const inT = t.includes(w), inX = x.includes(w);
             if (!inT && !inX) { alle = false; break; }
             score += (inT ? 10 : 0) + (inX ? 2 : 0) + (t.startsWith(w) ? 5 : 0);
         }
         if (!alle) continue;
         // Begriffe und Abschlüsse vor langen Gesetzestexten
-        score += { Abschluss: 4, 'Nach Klasse 10': 3, Glossar: 3, FAQ: 2, Weg: 2, Gesetzestext: 0 }[e.typ] || 0;
-        treffer.push({ ...e, score, auszug: AB.auszug(e.text, woerter) });
+        treffer.push({ e, score: score + e._bonus });
     }
     treffer.sort((a, b) => b.score - a.score);
-    return typeof max === 'number' ? treffer.slice(0, max) : treffer;
+    const auswahl = typeof max === 'number' ? treffer.slice(0, max) : treffer;
+    return auswahl.map(({ e, score }) => ({ ...e, score, auszug: AB.auszug(e._roh, woerter, e._x) }));
 };
 
 // Kurzer Textausschnitt um das erste gefundene Wort (Rohtext, ohne Markup)
-AB.auszug = function (text, woerter) {
-    const roh = String(text).replace(/<[^>]+>/g, '');
-    const norm = AB.normalisiere(roh);
+AB.auszug = function (text, woerter, normVorab) {
+    const roh = normVorab !== undefined ? text : String(text).replace(/<[^>]+>/g, '');
+    const norm = normVorab !== undefined ? normVorab : AB.normalisiere(roh);
     let pos = -1;
     for (const w of woerter) { pos = norm.indexOf(w); if (pos >= 0) break; }
     if (pos < 0 || roh.length <= 180) return roh.slice(0, 180) + (roh.length > 180 ? ' …' : '');
@@ -12807,15 +12852,23 @@ AB.statusVon = (erfuellt) => erfuellt === true ? 'ok' : erfuellt === false ? 'ne
 
 AB.hinweis = (status, inhalt) => `<div class="hinweis st-${status}">${AB.SYMBOL[status] || ''}<div>${inhalt}</div></div>`;
 
-// Quellenchips: <button class="ref" data-ref="sek26:37:3">§ 37 Abs. 3 Sek I-V 2026</button>
+// Schnelle deutsche Datumsformatierung ohne teure ICU-Initialisierung (toLocaleDateString)
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+AB.datumKurz = function (d) { const x = d || new Date(); return `${x.getDate()}.${x.getMonth() + 1}.${x.getFullYear()}`; };
+AB.datumLang = function (d) { const x = d || new Date(); return `${x.getDate()}. ${MONATE[x.getMonth()]} ${x.getFullYear()}`; };
+
+// Quellenchips: <button class="ref" data-ref="sek26:37:3">§ 37 Abs. 3 Sek I-V 2026</button> (mit Zwischenspeicher)
+const chipCache = Object.create(null);
 AB.refChips = function (refs) {
     if (!refs || !refs.length) return '';
-    return '<div class="refs">' + refs.map(r => {
+    const key = refs.join('|');
+    if (chipCache[key] !== undefined) return chipCache[key];
+    return (chipCache[key] = '<div class="refs">' + refs.map(r => {
         const p = AB.parseRef(r);
         if (!p) return '';
         const ohne = p.quelle.art === 'regelwerk' ? ' ref-ohne' : '';
         return `<button type="button" class="ref${ohne}" data-ref="${AB.esc(r)}" title="Quelle anzeigen">${AB.esc(p.label)}</button>`;
-    }).join('') + '</div>';
+    }).join('') + '</div>');
 };
 
 AB.ARTEN = {
@@ -12897,10 +12950,17 @@ AB.rechtsstandHtml = function (schuljahr, jg, titel) {
 // Sanftes Springen zu einem Anker mit kurzer Markierung
 AB.springeZu = function (id) {
     if (!id) return;
-    const el = document.getElementById(id);
+    let el = document.getElementById(id);
+    if (!el && id.startsWith('q-') && AB.quelleFuellen) {
+        document.querySelectorAll('details[data-quelle]').forEach(d => {
+            const qid = d.dataset.quelle;
+            if (id === 'q-' + qid || id.startsWith('q-' + qid + '-')) AB.quelleFuellen(d);
+        });
+        el = document.getElementById(id);
+    }
     if (!el) return;
     // Ziel und alle umgebenden <details> aufklappen (Quellenverzeichnis, FAQ)
-    for (let d = el; d; d = d.parentElement) if (d.tagName === 'DETAILS') d.open = true;
+    for (let d = el; d; d = d.parentElement) if (d.tagName === 'DETAILS') { if (d.dataset.quelle && AB.quelleFuellen) AB.quelleFuellen(d); d.open = true; }
     el.scrollIntoView({ block: 'start' });
     el.classList.remove('angesprungen'); void el.offsetWidth; el.classList.add('angesprungen');
 };
@@ -13066,8 +13126,9 @@ function loopSvg(art) {
         ${links}${rechts}${zeiger}</svg>`;
 }
 
+let loopHtml = null;
 AB.startLoop = function () {
-    return `<div class="fenster loop-fenster">
+    return loopHtml || (loopHtml = `<div class="fenster loop-fenster">
         <div class="loop-rahmen">
             <div class="loop-buehne" role="img" aria-label="Animation, erfundenes Beispiel: Im Abschlussrechner Jahrgang 10 wählen, Noten eintragen – der mögliche Abschluss wird sofort angezeigt.">
                 ${loopSvg('breit')}${loopSvg('schmal')}
@@ -13076,7 +13137,7 @@ AB.startLoop = function () {
                 <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g class="i-pause"><rect x="3.5" y="2.5" width="3" height="11" rx="1"/><rect x="9.5" y="2.5" width="3" height="11" rx="1"/></g><path class="i-play" d="M4.5 2.8v10.4L13.2 8z"/></svg>
             </button>
         </div>
-    </div>`;
+    </div>`);
 };
 
 })();
@@ -13316,17 +13377,32 @@ AB.seiten.wege = function () {
 };
 
 // --- Glossar ---------------------------------------------------------------------
+const glossarSortSchluessel = (s) => s.toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss');
 AB.seiten.wissen = function () {
-    const sortiert = AB.GLOSSAR.filter(AB.passt).sort((a, b) => a.begriff.localeCompare(b.begriff, 'de'));
-    const ab = (g) => AB.normalisiere(g.begriff).charAt(0).toUpperCase();
-    const buchst = [...new Set(sortiert.map(ab))];
+    const sortiert = AB.GLOSSAR.filter(AB.passt);
+    for (let i = 0; i < sortiert.length; i++) {
+        const g = sortiert[i];
+        if (!g._b) {
+            g._sort = glossarSortSchluessel(g.begriff);
+            g._b = AB.normalisiere(g.begriff).charAt(0).toUpperCase();
+            g._such = AB.esc(AB.normalisiere(g.begriff + ' ' + g.text));
+        }
+    }
+    sortiert.sort((a, b) => a._sort < b._sort ? -1 : a._sort > b._sort ? 1 : 0);
+    const buchst = [], nachBuchst = Object.create(null);
+    for (let i = 0; i < sortiert.length; i++) {
+        const g = sortiert[i], b = g._b;
+        if (!nachBuchst[b]) { nachBuchst[b] = []; buchst.push(b); }
+        nachBuchst[b].push(g);
+    }
+    const abcLinks = buchst.map(b => `<a href="#/wissen#b-${b}" data-b="${b}">${b}</a>`).join('');
     return kopf('Glossar', `${sortiert.length} Fachbegriffe rund um Abschlüsse, Kurse und Versetzung. Begriff antippen für die Erklärung.`) + `
         <div class="glossar-raster">
             <div class="glossar-haupt">
                 <div id="glossarListe">${buchst.map(b => `
                     <section class="buchstabe" id="b-${b}" data-b="${b}"><h2 class="buchstabe-kopf">${b}</h2>
-                    ${sortiert.filter(g => ab(g) === b).map(g => `
-                        <details class="klapp eintrag" id="g-${g.id}" data-text="${AB.esc(AB.normalisiere(g.begriff + ' ' + g.text))}">
+                    ${nachBuchst[b].map(g => `
+                        <details class="klapp eintrag" id="g-${g.id}" data-text="${g._such}">
                             <summary>${AB.esc(g.begriff)}</summary>
                             <div class="klapp-inhalt"><p>${AB.html(g.text)}</p>${AB.refChips(g.refs)}</div>
                         </details>`).join('')}
@@ -13336,44 +13412,61 @@ AB.seiten.wissen = function () {
             </div>
             <aside class="glossar-seite nicht-drucken">
                 <label class="feld">Begriffe filtern<input id="glossarFilter" type="search" placeholder="z. B. Kurs…"></label>
-                <nav class="abc" id="glossarAbc" aria-label="Nach Anfangsbuchstaben">${buchst.map(b => `<a href="#/wissen#b-${b}" data-b="${b}">${b}</a>`).join('')}</nav>
+                <nav class="abc" id="glossarAbc" aria-label="Nach Anfangsbuchstaben">${abcLinks}</nav>
             </aside>
         </div>
-        <nav class="abc-index nicht-drucken" id="glossarIndex" aria-label="Schnell zu Buchstabe">${buchst.map(b => `<a href="#/wissen#b-${b}" data-b="${b}">${b}</a>`).join('')}</nav>
+        <nav class="abc-index nicht-drucken" id="glossarIndex" aria-label="Schnell zu Buchstabe">${abcLinks}</nav>
         <div class="abc-blase" id="glossarBlase" aria-hidden="true"></div>`;
 };
 
 // --- FAQ -------------------------------------------------------------------------------
 AB.seiten.faq = function () {
     const faq = AB.FAQ.filter(AB.passt);
-    const themen = [...new Set(faq.map(f => f.thema))];
+    const themen = [], nachThema = Object.create(null);
+    for (let i = 0; i < faq.length; i++) {
+        const f = faq[i], t = f.thema;
+        if (!nachThema[t]) { nachThema[t] = []; themen.push(t); }
+        nachThema[t].push(f);
+    }
     return kopf('Häufige Fragen', 'Kurze Antworten mit Quelle. Frage antippen zum Aufklappen.') + AB.schulformWahl() +
-        `<nav class="themen nicht-drucken" aria-label="Themen">${themen.map((t, i) => `<a href="#/faq#t-${i}">${AB.esc(t)} <small>${faq.filter(f => f.thema === t).length}</small></a>`).join('')}</nav>` +
-        themen.map((t, i) => `<h2 class="abschnitt" id="t-${i}">${AB.esc(t)}</h2>` + faq.filter(f => f.thema === t).map(f => `
+        `<nav class="themen nicht-drucken" aria-label="Themen">${themen.map((t, i) => `<a href="#/faq#t-${i}">${AB.esc(t)} <small>${nachThema[t].length}</small></a>`).join('')}</nav>` +
+        themen.map((t, i) => `<h2 class="abschnitt" id="t-${i}">${AB.esc(t)}</h2>` + nachThema[t].map(f => `
             <details class="klapp" id="f-${f.id}">
                 <summary>${AB.esc(f.frage)}${f.offen ? ' ' + AB.pille('offen', 'noch nicht belegt') : ''}</summary>
                 <div class="klapp-inhalt"><p>${AB.html(f.antwort)}</p>${AB.refChips(f.refs)}</div>
             </details>`).join('')).join('');
 };
 
-// --- Quellen -------------------------------------------------------------------------
+// --- Quellen (Paragrafen werden erst beim Aufklappen / Anspringen / Drucken eingesetzt) ----
+AB.quelleInhaltHtml = function (qid) {
+    const q = AB.QUELLEN[qid];
+    if (!q) return '';
+    if (q._html) return q._html;
+    return (q._html = `<p><b>${AB.esc(q.titel)}</b><br><span class="gedaempft klein">${AB.esc(q.fundstelle)} · ${AB.esc(q.stand)}</span></p>
+        ${q.hinweis ? `<p class="klein">${AB.esc(q.hinweis)}</p>` : ''}
+        <p class="klein">${q.url ? `<a href="${AB.esc(q.url)}" target="_blank" rel="noopener">Online bei ${q.url.includes('bravors') ? 'BRAVORS' : 'der Quelle'} ↗</a>` : ''}${q.datei ? `${q.url ? ' · ' : ''}Datei im Projekt: <code>${AB.esc(q.datei)}</code>` : ''}</p>
+        ${(q.paragraphen || []).map(p => `
+            <div class="paragraf" id="${AB.refAnker(qid, p.nr)}">
+                <h2 class="paragraf-titel">${p.nr === '–' ? '' : (p.nr.includes('/') ? '§§&nbsp;' : '§&nbsp;') + AB.esc(p.nr) + ' '}${AB.esc(p.titel)}</h2>
+                ${p.absaetze.map(a => `<div class="absatz" id="${AB.refAnker(qid, p.nr, a.nr)}">${AB.absatzHtml(a)}</div>`).join('')}
+            </div>`).join('')}`);
+};
+
+AB.quelleFuellen = function (d) {
+    if (!d || !d.dataset.quelle) return;
+    const box = d.querySelector(':scope > .klapp-inhalt');
+    if (box && !box.firstChild) box.innerHTML = AB.quelleInhaltHtml(d.dataset.quelle);
+    delete d.dataset.quelle;
+};
+
 AB.seiten.quellen = function () {
     return kopf('Gesetze & Quellen', 'Alle Texte, auf die sich die App stützt – Verordnungen und Schulgesetz im amtlichen Wortlaut aus BRAVORS. Zum Lesen aufklappen; die §-Knöpfe in der App springen direkt an die Stelle.') +
         Object.entries(AB.QUELLEN).map(([qid, q]) => {
             const art = AB.ARTEN[q.art];
             const n = (q.paragraphen || []).length;
-            return `<details class="klapp quelle" id="${AB.refAnker(qid)}">
+            return `<details class="klapp quelle" id="${AB.refAnker(qid)}" data-quelle="${qid}">
                 <summary><span>${AB.esc(q.kurz)}</span>${AB.pille(art.status, art.text)}<span class="gedaempft klein">${n ? n + ' Paragrafen' : ''}</span></summary>
-                <div class="klapp-inhalt">
-                <p><b>${AB.esc(q.titel)}</b><br><span class="gedaempft klein">${AB.esc(q.fundstelle)} · ${AB.esc(q.stand)}</span></p>
-                ${q.hinweis ? `<p class="klein">${AB.esc(q.hinweis)}</p>` : ''}
-                <p class="klein">${q.url ? `<a href="${AB.esc(q.url)}" target="_blank" rel="noopener">Online bei ${q.url.includes('bravors') ? 'BRAVORS' : 'der Quelle'} ↗</a>` : ''}${q.datei ? `${q.url ? ' · ' : ''}Datei im Projekt: <code>${AB.esc(q.datei)}</code>` : ''}</p>
-                ${(q.paragraphen || []).map(p => `
-                    <div class="paragraf" id="${AB.refAnker(qid, p.nr)}">
-                        <h2 class="paragraf-titel">${p.nr === '–' ? '' : (p.nr.includes('/') ? '§§&nbsp;' : '§&nbsp;') + AB.esc(p.nr) + ' '}${AB.esc(p.titel)}</h2>
-                        ${p.absaetze.map(a => `<div class="absatz" id="${AB.refAnker(qid, p.nr, a.nr)}">${AB.absatzHtml(a)}</div>`).join('')}
-                    </div>`).join('')}
-                </div>
+                <div class="klapp-inhalt"></div>
             </details>`;
         }).join('');
 };
@@ -13395,6 +13488,11 @@ AB.seiten.anschluss = function () {
 AB.seiten.suche = function (q) {
     const treffer = q ? AB.suche(q) : [];
     const gruppen = ['Abschluss', 'Nach Klasse 10', 'Glossar', 'FAQ', 'Weg', 'Gesetzestext'];
+    const nachTyp = Object.create(null);
+    for (let i = 0; i < treffer.length; i++) {
+        const t = treffer[i];
+        (nachTyp[t.typ] || (nachTyp[t.typ] = [])).push(t);
+    }
     return kopf('Suche', 'Durchsucht Abschlüsse, Wege, Glossar, FAQ und alle hinterlegten Gesetzestexte.',
         `<form class="feld nicht-drucken" id="sucheSeiteForm" role="search"><label for="sucheSeite">Suchbegriff</label>
             <input id="sucheSeite" type="search" value="${AB.esc(q || '')}" placeholder="z. B. Nachprüfung…"></form>`) +
@@ -13402,8 +13500,8 @@ AB.seiten.suche = function (q) {
             !treffer.length ? `<p>Keine Treffer für „${AB.esc(q)}“. Tipp: kürzere Begriffe probieren, z. B. „Kurs“ statt „Kurswechsel“.</p>` :
             `<p class="gedaempft">${treffer.length} Treffer für „${AB.esc(q)}“</p>` +
             gruppen.map(g => {
-                const l = treffer.filter(t => t.typ === g);
-                if (!l.length) return '';
+                const l = nachTyp[g];
+                if (!l || !l.length) return '';
                 return `<h2 class="abschnitt">${g === 'Weg' ? 'Wege' : g === 'Abschluss' ? 'Abschlüsse' : g === 'Gesetzestext' ? 'Gesetzestexte' : g}</h2>` +
                     l.map(t => `<a class="karte kachel kachel-treffer" href="${t.route}"><h3>${AB.esc(t.titel)}</h3><span class="gedaempft">${AB.esc(t.auszug)}</span></a>`).join('');
             }).join(''));
@@ -13749,7 +13847,7 @@ AB.beratungAuswertung = function () {
         bedingungen: bw.erg[k], link: '#/abschluesse/' + k, ziel: k === a.ziel });
     return AB.auswertungHtml({
         titel: rolle.titel,
-        intro: `${AB.esc(AB.LAENDER[AB.auswahl.land].schulformen[sf].name)} · Klasse ${a.jg} im Schuljahr ${AB.schuljahrLabel(a.schuljahr)}${sf === 'OS' && a.klasse ? ' · ' + AB.esc(AB.KLASSENARTEN[a.klasse].name) : ''}${AB.beratungKursfaecher(a).length ? ' · E-Kurse: ' + (a.ekurse.length ? a.ekurse.map(k => k === 'NAWI' ? (AB.FACHNAMEN[a.nawi] || 'Naturwissenschaft') : AB.FACHNAMEN[k]).join(', ') : 'keine') : ''} · Stand ${new Date().toLocaleDateString('de-DE')}`,
+        intro: `${AB.esc(AB.LAENDER[AB.auswahl.land].schulformen[sf].name)} · Klasse ${a.jg} im Schuljahr ${AB.schuljahrLabel(a.schuljahr)}${sf === 'OS' && a.klasse ? ' · ' + AB.esc(AB.KLASSENARTEN[a.klasse].name) : ''}${AB.beratungKursfaecher(a).length ? ' · E-Kurse: ' + (a.ekurse.length ? a.ekurse.map(k => k === 'NAWI' ? (AB.FACHNAMEN[a.nawi] || 'Naturwissenschaft') : AB.FACHNAMEN[k]).join(', ') : 'keine') : ''} · Stand ${AB.datumKurz()}`,
         knoepfe: `<button class="knopf knopf-haupt" data-aktion="zumRechner">Im Rechner genau prüfen</button>
             <button class="knopf" data-aktion="drucken">Drucken</button>
             <button class="knopf knopf-dritt" data-aktion="neu">Neu beginnen</button>`,
@@ -13898,10 +13996,10 @@ AB.rechnerListe = function () {
     return AB.faecherlisteSF(AB.rechnerSF(), AB.rechnerRechtsstand(), r.jg, r.nawi, r.klasse);
 };
 
-AB.rechnerSchueler = function () {
+AB.rechnerSchueler = function (liste) {
     const r = AB.rechner, rs = AB.rechnerRechtsstand(), sf = AB.rechnerSF(), w = AB.rechnerWerte();
     const faecher = {};
-    AB.rechnerListe().forEach(x => { faecher[x.key] = { wert: w[x.key] === undefined ? null : w[x.key], kurs: r.kurse[x.key] || 'G' }; });
+    (liste || AB.rechnerListe()).forEach(x => { faecher[x.key] = { wert: w[x.key] === undefined ? null : w[x.key], kurs: r.kurse[x.key] || 'G' }; });
     return {
         schulform: sf, rechtsstand: rs, jg: r.jg, nawi: r.nawi, klasse: r.klasse,
         gewiEinzeln: !(sf === 'GES' && rs === 'alt') && r.gewiEinzeln,
@@ -14081,51 +14179,60 @@ AB.rechnerErgebnis = function () {
     const box = document.getElementById('rErgebnis');
     if (!box) return;
     const r = AB.rechner, sf = AB.rechnerSF(), punkte = AB.rechnerPunkte(), w = AB.rechnerWerte();
+    const liste = AB.rechnerListe();
     // Offen/zu der vorhandenen Aufklapper übernehmen, bevor neu gezeichnet wird (schnelles Tippen nach dem Aufklappen)
     box.querySelectorAll('details[data-merk]').forEach(d => { r.offen[d.dataset.merk] = d.open; });
-    const schueler = AB.rechnerSchueler();
+    const schueler = AB.rechnerSchueler(liste);
     const erg = AB.berechne(schueler);
     const wort = AB.STATUSWORT;
+    const ohne = schueler.ohne || [];
+    const aktiv = liste.filter(x => !ohne.includes(x.key));
 
-    // Notenanzeige je Zeile
+    // Notenanzeige je Zeile (nur geänderte Zellen anfassen)
     document.querySelectorAll('[data-anzeige]').forEach(td => {
         const k = td.dataset.anzeige, v = w[k];
+        let txt;
         if (punkte) {
             const kurs = ['DE', 'MA', 'EN', 'CH', 'PH'].includes(k) ? (r.kurse[k] === 'E' ? 'E' : 'G') : 'N';
             const n = AB.punkteZuNote(v, kurs);
-            td.textContent = n ? String(n) : '';
+            txt = n ? String(n) : '';
         } else {
-            td.textContent = v === null || v === undefined ? '' : String(Math.min(6, Math.max(1, Math.round(v))));
+            txt = v === null || v === undefined ? '' : String(Math.min(6, Math.max(1, Math.round(v))));
         }
+        if (td.textContent !== txt) td.textContent = txt;
     });
 
     // GEWI gesamt: wie die Regeln (Punkte: Ø gerundet; Noten: Einzelnoten gerundet, dann Ø gerundet)
     const gWert = document.getElementById('rGewiWert');
     if (gWert) {
-        const vs = AB.rechnerListe().filter(x => x.gruppe === 'GEWI' && !(schueler.ohne || []).includes(x.key))
+        const vs = aktiv.filter(x => x.gruppe === 'GEWI')
             .map(x => w[x.key]).filter(v => v !== null && v !== undefined && v !== '')
             .map(v => punkte ? Number(v) : Math.min(6, Math.max(1, Math.round(Number(v)))));
         const g = vs.length ? Math.round(vs.reduce((a, b) => a + b, 0) / vs.length) : null;
-        gWert.textContent = g === null ? '–' : String(g);
+        const gTxt = g === null ? '–' : String(g);
+        if (gWert.textContent !== gTxt) gWert.textContent = gTxt;
         const n = g === null ? null : punkte ? AB.punkteZuNote(g, 'N') : g;
-        document.getElementById('rGewiNote').textContent = n ? String(n) : '';
+        const nTxt = n ? String(n) : '';
+        const gNote = document.getElementById('rGewiNote');
+        if (gNote && gNote.textContent !== nTxt) gNote.textContent = nTxt;
     }
 
     // „Mein Stand“: höchster erreichter Abschluss (wie TGS „Möglicher Abschluss“)
     const hoechster = AB.hoechsterAbschluss(erg);
     const stand = document.getElementById('rStand');
     if (stand) {
-        stand.textContent = hoechster ? AB.rechnerTitel(hoechster, sf, r.jg) : 'noch keiner';
+        const standTxt = hoechster ? AB.rechnerTitel(hoechster, sf, r.jg) : 'noch keiner';
+        if (stand.textContent !== standTxt) stand.textContent = standTxt;
         stand.classList.toggle('keiner', !hoechster);
     }
-    const ohneBew = AB.rechnerListe().filter(x => !(schueler.ohne || []).includes(x.key) && (w[x.key] === undefined || w[x.key] === null));
+    const ohneBew = aktiv.filter(x => w[x.key] === undefined || w[x.key] === null);
     // Zähler „x von y Fächern eingetragen“ + Löschen nur, wenn es etwas zu löschen gibt
-    const alle = AB.rechnerListe().filter(x => !(schueler.ohne || []).includes(x.key)).length;
+    const alle = aktiv.length;
     const zaehler = document.getElementById('rZaehler');
     if (zaehler) zaehler.innerHTML = `<b>${alle - ohneBew.length}</b> von ${alle} Fächern eingetragen`;
     const leeren = document.getElementById('rLeeren');
     if (leeren) leeren.disabled = alle === ohneBew.length && !Object.keys(r.kurse).length;
-    const zeigeE = AB.rechnerListe().some(x => x.diff);
+    const zeigeE = liste.some(x => x.diff);
     const kz = punkte
         ? `<div class="kennzahl"><strong>${erg.kennzahlen.sumTotal}</strong><span>Punkte gesamt</span></div>
            <div class="kennzahl"><strong>${erg.kennzahlen.sumFG2}</strong><span>Punkte FG II</span></div>`
@@ -14191,7 +14298,7 @@ AB.rechnerDruckbogen = function () {
         <div class="db-person">
             <p class="db-namenszeile">Name</p>
             <p class="db-meta">Schuljahr ${AB.schuljahrLabel(r.schuljahr)}</p>
-            <p class="db-meta">${new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <p class="db-meta">${AB.datumLang()}</p>
         </div>
     </header>`;
 
@@ -14328,7 +14435,7 @@ AB.rechnerAuswertung = function () {
     const rechtsstand = AB.rechtsstandHtml(r.schuljahr, jg, 'inhalt');
     return AB.auswertungHtml({
         titel: 'Deine Auswertung',
-        intro: `${esc(AB.LAENDER[AB.auswahl.land].schulformen[sf].name)} · Klasse ${jg} · ${esc(R.kurz)} (${esc(AB.bewertung(rs))})${sf === 'OS' ? ' · ' + esc(AB.KLASSENARTEN[r.klasse].name) : ''} · Stand ${new Date().toLocaleDateString('de-DE')}`,
+        intro: `${esc(AB.LAENDER[AB.auswahl.land].schulformen[sf].name)} · Klasse ${jg} · ${esc(R.kurz)} (${esc(AB.bewertung(rs))})${sf === 'OS' ? ' · ' + esc(AB.KLASSENARTEN[r.klasse].name) : ''} · Stand ${AB.datumKurz()}`,
         knoepfe: `<a class="knopf knopf-haupt" href="#/rechner">← Noten ändern</a>
             <button class="knopf" data-aktion="drucken">Drucken</button>
             ${sf !== 'GYM' ? '<a class="knopf" href="#/pruefung">Prüfungsrechner</a>' : ''}`,
@@ -14662,18 +14769,21 @@ AB.initDatenschutz = function () {
 AB.initDatenschutzBildlauf = function () {
     const knopf = document.getElementById('dsKnopf');
     if (!knopf) return;
-    let letzteY = window.scrollY, ruhe = null, wartet = false;
+    let letzteY = window.scrollY, ruhe = null, wartet = false, istWeg = false;
     window.addEventListener('scroll', () => {
         if (wartet) return; wartet = true;
         requestAnimationFrame(() => {
             wartet = false;
             const y = window.scrollY, d = y - letzteY;
             if (Math.abs(d) > 4) {
-                knopf.classList.toggle('ds-weg', d < 0 && y > 40);   // nur beim Hochscrollen weg; ganz oben bleibt er sichtbar
+                const weg = d < 0 && y > 40;   // nur beim Hochscrollen weg; ganz oben bleibt er sichtbar
+                if (weg !== istWeg) { istWeg = weg; knopf.classList.toggle('ds-weg', weg); }
                 letzteY = y;
             }
-            clearTimeout(ruhe);
-            ruhe = setTimeout(() => { knopf.classList.remove('ds-weg'); letzteY = window.scrollY; }, 350);
+            if (istWeg) {
+                clearTimeout(ruhe);
+                ruhe = setTimeout(() => { istWeg = false; knopf.classList.remove('ds-weg'); letzteY = window.scrollY; }, 350);
+            }
         });
     }, { passive: true });
 };
@@ -14942,7 +15052,8 @@ AB.zumFazit = function () {
 AB.ERSCHEINEN_SEL = '.karte, .abschnitt, .aufruf, .fg-karte, details.klapp, .leiter > li, .tabelle-rahmen, .zeitleiste > li, .kennzahlen, .hinweis, .stationen, .ziele';
 AB.erscheinen = function () {
     if (AB.erscheinBeobachter) AB.erscheinBeobachter.disconnect();
-    if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // Handy/Tablet (≤ 900 px, v0.9.6): kein Einblenden – Inhalt steht sofort, nichts bewegt sich beim Wischen (flüssiger)
+    if (!('IntersectionObserver' in window) || window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 900px)').matches) return;
     const unten = window.innerHeight * .95, ziele = [];
     document.querySelectorAll('#main :is(' + AB.ERSCHEINEN_SEL + ')').forEach(el => {
         if (el.closest('.held, .klebend, #glossarListe') ||   /* Glossar: lange Liste mit Sprüngen – nichts einblenden */
@@ -15185,6 +15296,19 @@ AB.initMain = function () {
     });
 };
 
+// Flüssiges Scrollen (v0.9.6): Startseiten-Animationen (wabernder Hintergrund, Rechner-Loop) pausieren, solange gescrollt wird
+// oder der Held nicht mehr im Bild ist – die Grafikarbeit (Unschärfe, Mischmodus) kostet sonst gerade beim Scrollen am meisten.
+AB.initScrollRuhe = function () {
+    let uhr = null, rahmen = 0, scrollt = false;
+    const pruefe = () => { rahmen = 0; const h = document.querySelector('.held'); if (h) h.classList.toggle('ruht', h.getBoundingClientRect().bottom < 0); };
+    window.addEventListener('scroll', () => {
+        if (!scrollt) { scrollt = true; document.documentElement.classList.add('scrollt'); }
+        clearTimeout(uhr);
+        uhr = setTimeout(() => { scrollt = false; document.documentElement.classList.remove('scrollt'); }, 200);
+        if (!rahmen) rahmen = requestAnimationFrame(pruefe);
+    }, { passive: true });
+};
+
 AB.start = function () {
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
     let wartet = false;
@@ -15198,6 +15322,7 @@ AB.start = function () {
     AB.initQuellenDialog();
     AB.initDatenschutz();
     AB.initDatenschutzBildlauf();
+    AB.initScrollRuhe();
     // Wechsel zwischen zwei Abschluss-Seiten: Bildlaufposition halten, Pille gleitet (kein Springen)
     let letzte = AB.route();
     window.addEventListener('hashchange', () => {
