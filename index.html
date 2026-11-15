@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#FCF9F7">
 <meta name="color-scheme" content="light">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-2b+sqDQheflKGBTPkcxHC4G9OBTb1iCB/LqR/POzU30='; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-qVRPRTbdUrVxm2Ua9bBc2X2Op1uRawcApFpG/4pylpI='; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Abschlussberatung Sek I</title>
 <meta name="description" content="Beratung zu Schulabschlüssen in Brandenburg: BBR, EBR, MSA (FOR) und FOR-Q – mit geführter Beratung, Rechner, Glossar und Gesetzestexten.">
@@ -1241,13 +1241,13 @@ details.abschluss-karte[class*="karte-"] .pille { background: rgba(255,255,255,.
                     <a href="#/wissen" data-bereich="nachschlagen">Nachschlagen</a>
                 </nav>
                 <div class="menue-liste" id="menueListe"></div>
-                <div class="suchfeld">
+                <form class="suchfeld" id="suchForm" role="search" action="#/suche">
                     <label for="suche" class="sr-only">Suche</label>
                     <input id="suche" type="text" inputmode="search" enterkeyhint="search" placeholder="Suchen…" autocomplete="off"
                            role="combobox" aria-expanded="false" aria-controls="suchVorschau" aria-autocomplete="list">
                     <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     <div class="such-vorschau" id="suchVorschau" role="listbox" hidden></div>
-                </div>
+                </form>
                 <a class="knopf knopf-indigo knopf-leiste" href="#/rechner">Abschluss berechnen</a>
             </div>
             <nav class="mega" id="mega" hidden></nav>
@@ -1261,7 +1261,7 @@ details.abschluss-karte[class*="karte-"] .pille { background: rgba(255,255,255,.
     <div class="innen">
         <p class="fuss-satz">Orientierungshilfe, keine Rechtsberatung.</p>
         <p>Verbindlich entscheidet die Klassenkonferenz. Maßgeblich ist der amtliche Text der Verordnung.</p>
-        <p>Es werden keine Daten gespeichert oder übertragen. Stand der Rechtsquellen: Wortlaut aus BRAVORS, abgerufen am 09.11.2026 · Version 0.9.4</p>
+        <p>Es werden keine Daten gespeichert oder übertragen. Stand der Rechtsquellen: Wortlaut aus BRAVORS, abgerufen am 09.11.2026 · Version 0.9.5</p>
     </div>
 </footer>
 
@@ -15064,8 +15064,17 @@ AB.initSuche = function () {
     const feld = document.getElementById('suche');
     const box = document.getElementById('suchVorschau');
     let aktiv = -1, treffer = [];
+    // Handy/Tablet (Menü, ≤ 1100 px): keine Vorschau beim Tippen – erst nach dem Absenden zu den Suchergebnissen (Nutzerwunsch v0.9.5)
+    const mobil = () => window.matchMedia('(max-width: 1100px)').matches;
     const zu = () => { box.hidden = true; feld.setAttribute('aria-expanded', 'false'); aktiv = -1; };
+    const absenden = () => {
+        const q = feld.value.trim();
+        if (!q) return;
+        location.hash = aktiv >= 0 && treffer[aktiv] ? treffer[aktiv].route : '#/suche?q=' + encodeURIComponent(q);
+        zu(); feld.blur(); feld.value = '';   // Ergebnisseite hat ein eigenes Suchfeld mit dem Begriff
+    };
     const zeige = () => {
+        if (mobil()) { treffer = []; zu(); return; }
         treffer = AB.suche(feld.value, 7);
         if (!feld.value.trim()) { zu(); return; }
         box.innerHTML = (treffer.length ? treffer.map((t, i) =>
@@ -15078,12 +15087,10 @@ AB.initSuche = function () {
     feld.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowDown' && treffer.length) { e.preventDefault(); aktiv = Math.min(aktiv + 1, treffer.length - 1); zeige(); }
         else if (e.key === 'ArrowUp' && treffer.length) { e.preventDefault(); aktiv = Math.max(aktiv - 1, 0); zeige(); }
-        else if (e.key === 'Enter') {
-            e.preventDefault();
-            location.hash = aktiv >= 0 && treffer[aktiv] ? treffer[aktiv].route : '#/suche?q=' + encodeURIComponent(feld.value);
-            zu(); feld.blur();
-        } else if (e.key === 'Escape') { feld.value = ''; zu(); }
+        else if (e.key === 'Escape') { feld.value = ''; zu(); }
     });
+    // Absenden über Enter bzw. die „Suchen“-Taste der Handytastatur (Formular – lösen mobile Tastaturen zuverlässig aus)
+    document.getElementById('suchForm').addEventListener('submit', (e) => { e.preventDefault(); absenden(); });
     box.addEventListener('click', () => { zu(); feld.value = ''; });
     document.addEventListener('click', (e) => { if (!e.target.closest('.suchfeld')) zu(); });
 };
