@@ -3,7 +3,7 @@
 // Gespeichert werden NUR die App-Dateien (Seite, Manifest, Symbole) – nie Eingaben.
 // Seite: erst Netz (immer die neueste Fassung), ohne Netz die gespeicherte Kopie.
 // Symbole/Manifest: erst Speicher, sonst Netz.
-const CACHE = 'abschluss-0.10.0';
+const CACHE = 'abschluss-0.11.0';
 const DATEIEN = ['./', 'manifest.webmanifest', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/logo.svg'];
 
 self.addEventListener('install', (e) => {
